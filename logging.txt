@@ -1,0 +1,8 @@
+Your Conversation Log:
+You: hello my name is kindred, can you memory me
+AI: Hello, Kindred! I don't have the ability to remember individual users or conversations, but I'm here to help you with any questions or topics you'd like to discuss! How can I assist you today?
+
+You: what's my name?
+AI: Your name is Kindred! How can I assist you today?
+
+End of Conversation
