@@ -21,12 +21,16 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 if not OPENAI_API_KEY or not OPENAI_BASE_URL:
     raise ValueError("Please set OPENAI_API_KEY and OPENAI_BASE_URL in your environment variables.")
 
+# 
 llm = ChatOpenAI(
     api_key=SecretStr(OPENAI_API_KEY),
     base_url=OPENAI_BASE_URL,
     model="gpt-4o-mini"
 )
 
+# 向量 
+# 每一个向量之间的转换都需要向量模型的参与
+# 每一个llm 都有对应的向量模型
 embeddings = OpenAIEmbeddings(
     api_key=SecretStr(OPENAI_API_KEY),
     base_url=OPENAI_BASE_URL,
@@ -45,6 +49,7 @@ try:
 except Exception as e:
     raise RuntimeError(f"Failed to load and split PDF: {str(e)}")
 
+# 文件切割器 把pdf识别到的文件 转换为 ai可以看懂的格式
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=200,
     chunk_overlap=50,
@@ -53,12 +58,15 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 pages_split = text_splitter.split_documents(pages)
 
-persist_directory = "/home/kindredzhang/data/projects/ai/kindred-langgraph/src/agents"
+# 把上述文件转换为向量后存储的地方，换句话来说就是db文件 数据库
+persist_directory = "/home/kindredzhang/data/projects/ai/kindred-langgraph/src/langgraph/agents"
 if not os.path.exists(persist_directory):
     os.makedirs(persist_directory)
 
+# 数据库名
 collection_name = "rag_agent_collection"
 
+# chroma实例
 try:
     vector_store = Chroma.from_documents(
         documents=pages_split,
@@ -69,6 +77,8 @@ try:
 except Exception as e:
     raise RuntimeError(f"Failed to create vector store: {str(e)}")
 
+# 检索 当我使用检索功能的时候会查询到相似的数据 search_kwargs：返回数量
+# 比如 pdf文件拆成了30块，有十条信息和我的问题相匹配，默认返回5条
 retriever = vector_store.as_retriever(
     search_type="similarity",
     search_kwargs={"k": 5} # K is the amount of chunks to return
@@ -163,3 +173,6 @@ def running_agent():
 
 if __name__ == "__main__":
     running_agent()
+
+
+# 提问 》》 拿着提问的问题去匹配# 》》 拿着匹配到的内容拼接第一次提问的问题去重新问问题 》》 回答
