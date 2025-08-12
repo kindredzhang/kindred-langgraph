@@ -1,0 +1,158 @@
+# 流式响应系统 - 数据库表结构设计
+# 用于观察和理解数据存储结构
+
+================================================================================
+                              数据库表结构设计
+================================================================================
+
+## 1. 会话表 (sessions.txt)
+================================================================================
+表名: sessions
+描述: 存储用户会话信息
+
+字段结构:
+session_id      | VARCHAR(36)  | PRIMARY KEY | 会话唯一标识符 (UUID)
+user_question   | TEXT         | NOT NULL    | 用户提出的问题
+status          | VARCHAR(20)  | DEFAULT 'active' | 会话状态 (active/completed/error)
+created_at      | TIMESTAMP    | NOT NULL    | 会话创建时间
+updated_at      | TIMESTAMP    | NOT NULL    | 会话最后更新时间
+
+索引:
+- PRIMARY KEY (session_id)
+- INDEX idx_status (status)
+- INDEX idx_created_at (created_at)
+
+示例数据:
+session_id                          | user_question        | status    | created_at           | updated_at
+123e4567-e89b-12d3-a456-426614174000 | 计算25+37是多少？    | completed | 2024-01-01T10:00:00 | 2024-01-01T10:01:30
+223e4567-e89b-12d3-a456-426614174001 | 100除以4等于多少？   | completed | 2024-01-01T11:00:00 | 2024-01-01T11:02:15
+
+
+## 2. 消息表 (messages.txt)
+================================================================================
+表名: messages  
+描述: 存储流式响应的所有消息
+
+字段结构:
+message_id      | VARCHAR(36)  | PRIMARY KEY | 消息唯一标识符 (UUID)
+session_id      | VARCHAR(36)  | FOREIGN KEY | 关联会话ID
+type           | VARCHAR(20)  | NOT NULL    | 消息类型 (thinking/reasoning/tool_call/tool_result/final_answer/error)
+content        | TEXT         | NOT NULL    | 消息内容
+metadata       | JSON         | NULL        | 消息元数据 (工具信息、步骤信息等)
+timestamp      | TIMESTAMP    | NOT NULL    | 消息创建时间
+
+索引:
+- PRIMARY KEY (message_id)
+- FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+- INDEX idx_session_type (session_id, type)
+- INDEX idx_timestamp (timestamp)
+
+示例数据:
+message_id                          | session_id                          | type      | content                    | metadata                                | timestamp
+msg1-4567-e89b-12d3-a456-426614174000 | 123e4567-e89b-12d3-a456-426614174000 | thinking  | 🤔 让我分析一下你的问题... | {"step": "initial_thinking"}          | 2024-01-01T10:00:01
+msg2-4567-e89b-12d3-a456-426614174001 | 123e4567-e89b-12d3-a456-426614174000 | reasoning | 💭 推理结果: 需要计算加法   | {"step": "reasoning", "has_tool_calls": true} | 2024-01-01T10:00:05
+msg3-4567-e89b-12d3-a456-426614174002 | 123e4567-e89b-12d3-a456-426614174000 | tool_call | 🔧 准备调用工具: add_numbers | {"tool_name": "add_numbers", "tool_args": {"a": 25, "b": 37}} | 2024-01-01T10:00:10
+
+
+## 3. 工具调用表 (tool_calls.txt) - 可选扩展
+================================================================================
+表名: tool_calls
+描述: 详细记录工具调用信息
+
+字段结构:
+call_id         | VARCHAR(36)  | PRIMARY KEY | 工具调用唯一标识符
+session_id      | VARCHAR(36)  | FOREIGN KEY | 关联会话ID
+tool_name       | VARCHAR(100) | NOT NULL    | 工具名称
+tool_args       | JSON         | NOT NULL    | 工具参数
+result          | TEXT         | NULL        | 工具执行结果
+success         | BOOLEAN      | DEFAULT true| 执行是否成功
+error_message   | TEXT         | NULL        | 错误信息
+execution_time  | INTEGER      | NULL        | 执行耗时(毫秒)
+created_at      | TIMESTAMP    | NOT NULL    | 调用时间
+
+索引:
+- PRIMARY KEY (call_id)
+- FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+- INDEX idx_tool_name (tool_name)
+- INDEX idx_success (success)
+
+
+## 4. 数据关系图
+================================================================================
+
+┌─────────────────┐         ┌──────────────────┐         ┌──────────────────┐
+│   sessions      │ 1    ∞  │    messages      │ 1    ∞  │   tool_calls     │
+├─────────────────┤◄────────┤──────────────────┤◄────────┤──────────────────┤
+│ session_id (PK) │         │ message_id (PK)  │         │ call_id (PK)     │
+│ user_question   │         │ session_id (FK)  │         │ session_id (FK)  │
+│ status          │         │ type             │         │ tool_name        │
+│ created_at      │         │ content          │         │ tool_args        │
+│ updated_at      │         │ metadata         │         │ result           │
+└─────────────────┘         │ timestamp        │         │ success          │
+                            └──────────────────┘         │ created_at       │
+                                                        └──────────────────┘
+
+
+## 5. 消息类型说明
+================================================================================
+
+thinking     - 思考消息: Agent开始分析问题
+reasoning    - 推理消息: Agent的推理过程和结论
+tool_call    - 工具调用: 准备调用特定工具
+tool_result  - 工具结果: 工具执行后的返回结果
+final_answer - 最终答案: Agent给出的最终回答
+error        - 错误消息: 处理过程中的错误信息
+
+
+## 6. 查询示例
+================================================================================
+
+-- 获取某个会话的完整对话流
+SELECT m.type, m.content, m.metadata, m.timestamp
+FROM messages m
+WHERE m.session_id = '123e4567-e89b-12d3-a456-426614174000'
+ORDER BY m.timestamp;
+
+-- 统计各类型消息数量
+SELECT type, COUNT(*) as count
+FROM messages
+GROUP BY type;
+
+-- 查找使用了工具的会话
+SELECT DISTINCT s.session_id, s.user_question
+FROM sessions s
+JOIN messages m ON s.session_id = m.session_id
+WHERE m.type = 'tool_call';
+
+-- 查找错误会话
+SELECT s.session_id, s.user_question, s.status
+FROM sessions s
+WHERE s.status = 'error'
+ORDER BY s.created_at DESC;
+
+
+## 7. 性能优化建议
+================================================================================
+
+1. 分区策略: 按时间分区，便于归档旧数据
+2. 索引优化: 为常用查询添加复合索引
+3. 数据清理: 定期清理过期的临时数据
+4. 缓存策略: 对频繁访问的会话数据使用缓存
+5. 读写分离: 流式写入与查询分离，提高性能
+
+
+## 8. 扩展字段建议
+================================================================================
+
+sessions表可扩展字段:
+- user_id: 用户标识符
+- ip_address: 用户IP地址
+- user_agent: 用户代理信息
+- language: 用户语言偏好
+- priority: 会话优先级
+
+messages表可扩展字段:
+- response_time: 响应耗时
+- model_version: 使用的模型版本
+- tokens_used: 使用的token数量
+- confidence_score: 置信度评分
